@@ -1,0 +1,10 @@
+.env
+.kaggle/
+venv/
+__pycache__/
+*.log
+.pytest_cache/
+Data-Pipeline/logs/
+Data-Pipeline/data/raw/
+Data-Pipeline/data/processed/
+*.pkl
