@@ -1,70 +1,19 @@
-# ShiftHappens - Data Pipeline
+# ShiftHappens: MLOps Monitoring for SMEs
 
-## Overview
-This repository contains the Airflow data pipeline for ShiftHappens. The pipeline automates the ingestion, preprocessing, validation, and bias detection for the Home Credit Default Risk dataset.
+## Project Objective
+ShiftHappens is a lightweight, serverless MLOps monitoring platform designed for small and medium enterprises (SMEs) and AI consultancies. It acts as an "early warning system" for deployed machine learning models, detecting data drift and performance degradation before it impacts client relationships. 
 
-## Repository Structure
-* `dags/`: Contains the Apache Airflow DAG definitions (`home_credit_pipeline.py`).
-* `data/`: Local directory for storing raw and processed datasets (tracked via DVC).
-* `scripts/`: Modular Python scripts for downloading, cleaning, feature engineering, and bias slicing.
-* `tests/`: Unit tests (using pytest) to ensure robustness of preprocessing steps.
-* `logs/`: Airflow and application execution logs.
-* `dvc.yaml`: Configuration for Data Version Control.
+It answers three core questions for deployed models:
+1. **Is it broken?** (Health monitoring)
+2. **Who broke it?** (Drift detection)
+3. **Can we fix it?** (One-click remediation)
 
-## Environment Setup & Reproducibility
-To replicate this pipeline on another machine, ensure you have Python 3.9+ installed and follow these steps:
+## Current Status: Sprint 2 (Data Pipeline)
+We are currently in the Data Ingestion & Preprocessing phase. We are utilizing the **Home Credit Default Risk** dataset to simulate a production credit scoring model. 
 
-Clone the repository:
-```bash
-git clone https://github.com/semwalhritvik/shift-happens.git
-cd shift-happens/Data-Pipeline
-```
+### Phase 1 Deliverable: Automated Airflow Pipeline
+We have built a fully automated, test-driven ETL pipeline. 
+* **Location:** All pipeline code, DAGs, Pytest modules, and execution logs are located in the [`Data-Pipeline/`](./Data-Pipeline) directory.
+* **Key Features:** Features include DVC integration for data versioning, parallelized Airflow tasks for optimized feature engineering across 8 relational tables, targeted anomaly treatment (e.g., handling erroneous `DAYS_EMPLOYED` records), and Fairlearn integration for demographic bias mitigation.
 
-Create and activate a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-Pull versioned data with DVC:
-This project uses DVC to track the dataset. To pull the exact data versions used in this pipeline:
-```bash
-dvc pull
-```
-
-## Running the Airflow Pipeline
-This pipeline is orchestrated using Apache Airflow.
-
-Initialize the Airflow database and setup:
-```bash
-export AIRFLOW_HOME=$(pwd)
-airflow db init
-airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@shifthappens.local
-```
-
-Start the Airflow Scheduler and Webserver:
-Open two separate terminal windows.
-
-Terminal 1:
-```bash
-airflow scheduler
-```
-
-Terminal 2:
-```bash
-airflow webserver -p 8080
-```
-
-Trigger the DAG:
-Navigate to http://localhost:8080 in your browser, log in, unpause the `home_credit_pipeline` DAG, and trigger it manually.
-
-## Data Schema & Anomalies
-We utilize tools like TensorFlow Data Validation (TFDV) to automatically generate data schemas and catch anomalies (such as extreme values in `DAYS_EMPLOYED`). Alerts are configured to log errors appropriately.
-
-## Bias Detection
-We implement data slicing using the Fairlearn library to evaluate model performance across demographic subgroups to ensure fairness and address potential bias in the credit risk predictions.
+Please navigate to the `Data-Pipeline/README.md` for detailed instructions on reproducing the Airflow environment, viewing the Gantt chart optimizations, and running the unit tests.
