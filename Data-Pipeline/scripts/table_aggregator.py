@@ -8,86 +8,122 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-def aggregate_and_merge_dfs(app_train: pd.DataFrame, bureau: pd.DataFrame) -> pd.DataFrame:
+def load_file(path: str) -> pd.DataFrame:
+    if path.endswith('.pkl'):
+        return pd.read_pickle(path)
+    return pd.read_csv(path)
+
+def _aggregate_table(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
     """
-    Core logic: aggregates numerical features from bureau by SK_ID_CURR, 
-    and merges them into application_train.
+    Helper function to aggregate numerical features by SK_ID_CURR.
     """
-    logging.info("Identifying numerical columns in the bureau dataset...")
-    # Filter only numeric columns
-    num_cols = bureau.select_dtypes(include=['number']).columns.tolist()
+    logging.info(f"Identifying numerical columns for {prefix} dataset...")
+    num_cols = df.select_dtypes(include=['number']).columns.tolist()
     
     if 'SK_ID_CURR' not in num_cols:
-        logging.error("'SK_ID_CURR' not found or is not numeric in the bureau dataset.")
-        return app_train
+        logging.error(f"'SK_ID_CURR' not found or is not numeric in the {prefix} dataset.")
+        return pd.DataFrame()
         
-    # We do not want to aggregate the primary key itself or other IDs like SK_ID_BUREAU
-    cols_to_aggregate = [col for col in num_cols if col not in ['SK_ID_CURR', 'SK_ID_BUREAU']]
+    # Exclude primary keys and other common ID columns from aggregation
+    cols_to_aggregate = [col for col in num_cols if col not in ['SK_ID_CURR', 'SK_ID_BUREAU', 'SK_ID_PREV']]
     
     if not cols_to_aggregate:
-        logging.warning("No numerical columns available to aggregate in the bureau dataset.")
-        return app_train
+        logging.warning(f"No numerical columns available to aggregate in the {prefix} dataset.")
+        return pd.DataFrame()
 
-    logging.info("Aggregating bureau data (mean, sum, max, min, count) by SK_ID_CURR...")
+    logging.info(f"Aggregating {prefix} data (mean, sum, max, min, count) by SK_ID_CURR...")
     agg_funcs = ['mean', 'sum', 'max', 'min', 'count']
-    
-    # Create the aggregation dictionary
     agg_dict = {col: agg_funcs for col in cols_to_aggregate}
     
     # Perform the group by and aggregation
-    bureau_agg = bureau.groupby('SK_ID_CURR').agg(agg_dict)
+    df_agg = df.groupby('SK_ID_CURR').agg(agg_dict)
     
     # Flatten multi-level columns
-    # resulting columns will look like: BUREAU_DAYS_CREDIT_MEAN, BUREAU_DAYS_CREDIT_MAX, etc.
-    bureau_agg.columns = pd.Index([f"BUREAU_{c[0]}_{c[1].upper()}" for c in bureau_agg.columns.tolist()])
+    df_agg.columns = pd.Index([f"{prefix}_{c[0]}_{c[1].upper()}" for c in df_agg.columns.tolist()])
     
     # Reset index to make SK_ID_CURR a normal column again
-    bureau_agg = bureau_agg.reset_index()
+    df_agg = df_agg.reset_index()
     
-    logging.info(f"Aggregated bureau data shape: {bureau_agg.shape}")
-    
-    logging.info("Merging aggregated features back into the main application dataframe...")
-    # Perform a left join so we don't lose any application_train records
-    merged_df = app_train.merge(bureau_agg, on='SK_ID_CURR', how='left')
-    
-    logging.info(f"Merged dataframe shape: {merged_df.shape}")
-    return merged_df
+    logging.info(f"Aggregated {prefix} data shape: {df_agg.shape}")
+    return df_agg
 
-def aggregate_and_merge(app_train_path: str, bureau_path: str, output_path: str) -> None:
-    """
-    Reads application_train and bureau data, aggregates numerical features 
-    from bureau by SK_ID_CURR, and merges them into application_train.
-    """
+def aggregate_bureau(bureau_path: str, output_path: str) -> str:
     start_time = time.time()
-    
-    def load_file(path: str) -> pd.DataFrame:
-        if path.endswith('.pkl'):
-            return pd.read_pickle(path)
-        return pd.read_csv(path)
-        
     try:
-        logging.info(f"Loading main application table from {app_train_path}...")
-        app_train = load_file(app_train_path)
-        
-        logging.info(f"Loading secondary bureau table from {bureau_path}...")
+        logging.info(f"Loading bureau table from {bureau_path}...")
         bureau = load_file(bureau_path)
     except FileNotFoundError as e:
         logging.error(f"File not found: {e}")
-        return
-
-    merged_df = aggregate_and_merge_dfs(app_train, bureau)
+        return ""
+        
+    bureau_agg = _aggregate_table(bureau, "BUREAU")
     
-    logging.info(f"Saving merged dataframe to {output_path}...")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    merged_df.to_pickle(output_path)  # Saving to pickle for faster subsequent reads
-    
-    end_time = time.time()
-    execution_time = end_time - start_time
-    logging.info(f"Aggregation and merge completed successfully in {execution_time:.2f} seconds.")
+    bureau_agg.to_pickle(output_path)
+    logging.info(f"Bureau aggregation completed in {time.time() - start_time:.2f} seconds. Saved to {output_path}")
+    return output_path
 
-if __name__ == "__main__":
-    aggregate_and_merge(
-        app_train_path='data/raw/application_train.csv',
-        bureau_path='data/raw/bureau.csv',
-        output_path='data/processed/application_train_with_bureau.pkl'
-    )
+def aggregate_previous_applications(prev_app_path: str, output_path: str) -> str:
+    start_time = time.time()
+    try:
+        logging.info(f"Loading previous applications table from {prev_app_path}...")
+        prev_app = load_file(prev_app_path)
+    except FileNotFoundError as e:
+        logging.error(f"File not found: {e}")
+        return ""
+        
+    prev_app_agg = _aggregate_table(prev_app, "PREV_APP")
+    
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    prev_app_agg.to_pickle(output_path)
+    logging.info(f"Previous applications aggregation completed in {time.time() - start_time:.2f} seconds. Saved to {output_path}")
+    return output_path
+
+def aggregate_installments(installments_path: str, output_path: str) -> str:
+    start_time = time.time()
+    try:
+        logging.info(f"Loading installments table from {installments_path}...")
+        installments = load_file(installments_path)
+    except FileNotFoundError as e:
+        logging.error(f"File not found: {e}")
+        return ""
+        
+    installments_agg = _aggregate_table(installments, "INSTALLMENTS")
+    
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    installments_agg.to_pickle(output_path)
+    logging.info(f"Installments aggregation completed in {time.time() - start_time:.2f} seconds. Saved to {output_path}")
+    return output_path
+
+def merge_features(app_train_path: str, bureau_agg_path: str, prev_app_agg_path: str, installments_agg_path: str, output_path: str) -> str:
+    start_time = time.time()
+    try:
+        logging.info(f"Loading main application table from {app_train_path}...")
+        merged_df = load_file(app_train_path)
+    except FileNotFoundError as e:
+        logging.error(f"Main application table not found: {e}")
+        return ""
+        
+    paths_and_names = [
+        (bureau_agg_path, "Bureau"),
+        (prev_app_agg_path, "Previous Applications"),
+        (installments_agg_path, "Installments")
+    ]
+    
+    for path, name in paths_and_names:
+        if path and os.path.exists(path):
+            try:
+                logging.info(f"Merging {name} features from {path}...")
+                agg_df = load_file(path)
+                merged_df = merged_df.merge(agg_df, on='SK_ID_CURR', how='left')
+            except Exception as e:
+                logging.error(f"Error merging {name} features: {e}")
+        else:
+            logging.warning(f"Path for {name} aggregation ({path}) does not exist. Skipping.")
+            
+    logging.info(f"Final merged dataframe shape: {merged_df.shape}")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    merged_df.to_pickle(output_path)
+    logging.info(f"Merge completed successfully in {time.time() - start_time:.2f} seconds. Saved to {output_path}")
+    
+    return output_path

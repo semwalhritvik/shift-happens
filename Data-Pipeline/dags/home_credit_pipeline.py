@@ -69,29 +69,48 @@ def treat_outliers(**kwargs):
     # Save processed path to XCom
     return app_train_cleaned_path
 
-def aggregate_tables(**kwargs):
+def agg_bureau(**kwargs):
+    logging.info("Aggregating bureau table...")
+    bureau_path = 'data/raw/bureau.csv'
+    output_path = 'data/processed/bureau_agg.pkl'
+    return table_aggregator.aggregate_bureau(bureau_path=bureau_path, output_path=output_path)
+
+def agg_prev(**kwargs):
+    logging.info("Aggregating previous applications table...")
+    prev_app_path = 'data/raw/previous_application.csv'
+    output_path = 'data/processed/prev_app_agg.pkl'
+    return table_aggregator.aggregate_previous_applications(prev_app_path=prev_app_path, output_path=output_path)
+
+def agg_installments(**kwargs):
+    logging.info("Aggregating installments table...")
+    installments_path = 'data/raw/installments_payments.csv'
+    output_path = 'data/processed/installments_agg.pkl'
+    return table_aggregator.aggregate_installments(installments_path=installments_path, output_path=output_path)
+
+def merge_features_call(**kwargs):
     ti = kwargs['ti']
     app_train_cleaned_path = ti.xcom_pull(task_ids='handle_outliers')
-    extracted_paths = ti.xcom_pull(task_ids='download_kaggle_data')
+    bureau_agg_path = ti.xcom_pull(task_ids='task_agg_bureau')
+    prev_app_agg_path = ti.xcom_pull(task_ids='task_agg_prev')
+    installments_agg_path = ti.xcom_pull(task_ids='task_agg_installments')
     
-    if not app_train_cleaned_path or not extracted_paths or 'bureau_path' not in extracted_paths:
-        raise ValueError("Paths to train or bureau data not found in XCom.")
+    if not app_train_cleaned_path:
+        raise ValueError("Path to train data not found in XCom.")
         
-    bureau_path = extracted_paths['bureau_path']
-    merged_output_path = 'data/processed/application_train_with_bureau.pkl'
+    merged_output_path = 'data/processed/application_train_merged.pkl'
     
-    logging.info("Aggregating bureau table and merging with train table...")
-    table_aggregator.aggregate_and_merge(
+    logging.info("Merging aggregated features with train table...")
+    return table_aggregator.merge_features(
         app_train_path=app_train_cleaned_path,
-        bureau_path=bureau_path,
+        bureau_agg_path=bureau_agg_path,
+        prev_app_agg_path=prev_app_agg_path,
+        installments_agg_path=installments_agg_path,
         output_path=merged_output_path
     )
-    
-    return merged_output_path
 
 def slice_bias(**kwargs):
     ti = kwargs['ti']
-    merged_output_path = ti.xcom_pull(task_ids='aggregate_tables')
+    merged_output_path = ti.xcom_pull(task_ids='task_merge_features')
     
     if not merged_output_path:
         raise ValueError("Merged dataset path not found in XCom.")
@@ -119,23 +138,42 @@ download_task = PythonOperator(
     dag=dag,
 )
 
-outlier_task = PythonOperator(
+task_outlier_treatment = PythonOperator(
     task_id='handle_outliers',
     python_callable=treat_outliers,
     dag=dag,
 )
 
-aggregation_task = PythonOperator(
-    task_id='aggregate_tables',
-    python_callable=aggregate_tables,
+task_agg_bureau = PythonOperator(
+    task_id='task_agg_bureau',
+    python_callable=agg_bureau,
     dag=dag,
 )
 
-bias_task = PythonOperator(
-    task_id='evaluate_model_bias',
+task_agg_prev = PythonOperator(
+    task_id='task_agg_prev',
+    python_callable=agg_prev,
+    dag=dag,
+)
+
+task_agg_installments = PythonOperator(
+    task_id='task_agg_installments',
+    python_callable=agg_installments,
+    dag=dag,
+)
+
+task_merge_features = PythonOperator(
+    task_id='task_merge_features',
+    python_callable=merge_features_call,
+    dag=dag,
+)
+
+task_bias_slicer = PythonOperator(
+    task_id='task_bias_slicer',
     python_callable=slice_bias,
     dag=dag,
 )
 
-# Set the sequential task dependencies
-download_task >> outlier_task >> aggregation_task >> bias_task
+# Dependencies
+download_task >> task_outlier_treatment
+task_outlier_treatment >> [task_agg_bureau, task_agg_prev, task_agg_installments] >> task_merge_features >> task_bias_slicer
