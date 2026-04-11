@@ -9,7 +9,6 @@ import pandas as pd
 import numpy as np
 from google.cloud import storage
 from io import BytesIO
-import subprocess
 from datetime import datetime
 
 from client_view import render_client_view
@@ -92,20 +91,18 @@ def get_model_health(drift_scores):
 
 def trigger_retraining():
     try:
-        result = subprocess.run(
-            [
-                "gcloud", "builds", "triggers", "run",
-                "shifthappens-model-pipeline",
-                "--region=northamerica-northeast2",
-                "--branch=main",
-                "--project=shifthappens-project"
-            ],
-            capture_output=True, text=True, timeout=30
+        from google.cloud import aiplatform
+        aiplatform.init(
+            project="shifthappens-project",
+            location="northamerica-northeast2"
         )
-        if result.returncode == 0:
-            return True, "Retraining pipeline triggered successfully!"
-        else:
-            return False, f"Failed: {result.stderr}"
+        job = aiplatform.PipelineJob(
+            display_name="shifthappens-retrain",
+            template_path="gs://shifthappens-model-registry/compiled_pipeline.json",
+            pipeline_root="gs://shifthappens-model-registry/pipeline_root/",
+        )
+        job.submit()
+        return True, f"Vertex AI retraining triggered! Job: {job.display_name}"
     except Exception as e:
         return False, f"Error: {str(e)}"
 
@@ -124,7 +121,7 @@ def render_retrain_button(health_status, health_color):
             """, unsafe_allow_html=True
         )
         if st.button("🔄 Trigger Retraining", type="primary", use_container_width=True):
-            with st.spinner("Triggering retraining pipeline..."):
+            with st.spinner("Initiating Vertex AI Pipeline..."):
                 success, msg = trigger_retraining()
                 if success:
                     st.success(msg)
@@ -143,7 +140,7 @@ def render_retrain_button(health_status, health_color):
             """, unsafe_allow_html=True
         )
         if st.button("🔄 Trigger Retraining", use_container_width=True):
-            with st.spinner("Triggering retraining pipeline..."):
+            with st.spinner("Initiating Vertex AI Pipeline..."):
                 success, msg = trigger_retraining()
                 if success:
                     st.success(msg)
@@ -153,7 +150,7 @@ def render_retrain_button(health_status, health_color):
     else:
         st.info("✅ Model is healthy — no retraining needed.")
         if st.button("🔄 Trigger Retraining (Manual)", use_container_width=True):
-            with st.spinner("Triggering retraining pipeline..."):
+            with st.spinner("Initiating Vertex AI Pipeline..."):
                 success, msg = trigger_retraining()
                 if success:
                     st.success(msg)
