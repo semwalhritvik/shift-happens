@@ -9,6 +9,7 @@ from airflow.operators.python import PythonOperator
 
 import sys
 import os
+
 # Add Data-Pipeline root to path so the scripts package is resolvable
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
