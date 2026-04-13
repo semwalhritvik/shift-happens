@@ -110,9 +110,55 @@ def trigger_retraining():
             pipeline_root="gs://shifthappens-model-registry/pipeline_root/",
         )
         job.submit()
+        st.session_state["pipeline_job"] = job
+        st.session_state["pipeline_status"] = "running"
         return True, f"Vertex AI retraining triggered! Job: {job.display_name}"
     except Exception as e:
         return False, f"Error: {str(e)}"
+
+
+def check_pipeline_status():
+    job = st.session_state.get("pipeline_job")
+    if job is None:
+        return None
+    try:
+        job.refresh()
+        state = job.state.name
+        if "SUCCEEDED" in state:
+            return "succeeded"
+        elif "FAILED" in state or "CANCELLED" in state:
+            return "failed"
+        else:
+            return "running"
+    except Exception:
+        return "unknown"
+
+
+def render_pipeline_status_banner():
+    status = st.session_state.get("pipeline_status")
+    if status == "running":
+        st.info("Pipeline is running — this takes ~5-10 min. Click **Check Status** to poll for updates.")
+        col1, _ = st.columns([1, 3])
+        with col1:
+            if st.button("Check Status", use_container_width=True):
+                current = check_pipeline_status()
+                st.session_state["pipeline_status"] = current
+                if current == "succeeded":
+                    st.cache_data.clear()
+                    st.rerun()
+                elif current == "failed":
+                    st.rerun()
+                else:
+                    st.info("Still running... check again in a minute.")
+
+    elif status == "succeeded":
+        st.success("Retraining complete! Drift scores have been updated. Click **Refresh Data** in the sidebar to see the updated dashboard.")
+        st.balloons()
+        st.session_state["pipeline_status"] = "done"
+
+    elif status == "failed":
+        st.error("Pipeline failed. Check Vertex AI logs for details.")
+        st.session_state["pipeline_status"] = None
 
 
 def render_retrain_button(health_status, health_color):
@@ -133,7 +179,6 @@ def render_retrain_button(health_status, health_color):
                 success, msg = trigger_retraining()
                 if success:
                     st.success(msg)
-                    st.balloons()
                 else:
                     st.error(msg)
     elif health_color == "orange":
@@ -152,7 +197,6 @@ def render_retrain_button(health_status, health_color):
                 success, msg = trigger_retraining()
                 if success:
                     st.success(msg)
-                    st.balloons()
                 else:
                     st.error(msg)
     else:
@@ -164,6 +208,8 @@ def render_retrain_button(health_status, health_color):
                     st.success(msg)
                 else:
                     st.error(msg)
+
+    render_pipeline_status_banner()
 
 
 # ─── Sidebar ──────────────────────────────────────────────
