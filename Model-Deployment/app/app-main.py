@@ -72,9 +72,12 @@ def load_drift_scores():
         client = bigquery.Client(project=BQ_PROJECT)
         query = f"""
             SELECT feature_name, psi, severity
-            FROM `{BQ_PROJECT}.{BQ_DATASET}.drift_summary_daily`
-            ORDER BY created_at DESC
-            LIMIT 10
+            FROM (
+                SELECT feature_name, psi, severity,
+                       ROW_NUMBER() OVER (PARTITION BY feature_name ORDER BY created_at DESC) AS rn
+                FROM `{BQ_PROJECT}.{BQ_DATASET}.drift_summary_daily`
+            )
+            WHERE rn = 1
         """
         df = client.query(query).to_dataframe()
         return df
