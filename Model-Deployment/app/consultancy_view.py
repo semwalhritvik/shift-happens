@@ -1,8 +1,5 @@
 """
 Consultancy View — Model Monitoring Dashboard
-===============================================
-Your team monitors the model. Detailed drift analysis,
-feature distributions, fairness metrics, predictions.
 """
 
 import streamlit as st
@@ -17,58 +14,66 @@ def render_consultancy_view(predictions_df, training_df, drift_scores, health_st
     st.markdown("Detailed model performance, drift analysis, and monitoring metrics.")
     st.markdown("---")
 
-    # ─── Key Metrics ───────────────────────────────────────
+    has_target = "TARGET" in predictions_df.columns
+
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("Total Predictions", f"{len(predictions_df):,}")
     with col2:
-        safe_count = (predictions_df["PREDICTION"] == 0).sum()
-        st.metric("Predicted Safe", f"{safe_count:,}")
+        if has_target:
+            safe_count = (predictions_df["TARGET"] == 0).sum()
+            st.metric("Predicted Safe", f"{safe_count:,}")
+        else:
+            st.metric("Predicted Safe", "N/A")
     with col3:
-        default_count = (predictions_df["PREDICTION"] == 1).sum()
-        st.metric("Predicted Default", f"{default_count:,}")
+        if has_target:
+            default_count = (predictions_df["TARGET"] == 1).sum()
+            st.metric("Predicted Default", f"{default_count:,}")
+        else:
+            st.metric("Predicted Default", "N/A")
     with col4:
-        default_rate = (predictions_df["PREDICTION"] == 1).mean() * 100
-        st.metric("Default Rate", f"{default_rate:.1f}%")
+        if has_target:
+            default_rate = (predictions_df["TARGET"] == 1).mean() * 100
+            st.metric("Default Rate", f"{default_rate:.1f}%")
+        else:
+            st.metric("Default Rate", "N/A")
     with col5:
         st.metric("Health", health_status)
 
     st.markdown("---")
 
-    # ─── Prediction Distribution + Risk Score ──────────────
-    col_left, col_right = st.columns(2)
+    if has_target:
+        col_left, col_right = st.columns(2)
 
-    with col_left:
-        st.subheader("Prediction Distribution")
-        pred_counts = predictions_df["PREDICTION"].value_counts().reset_index()
-        pred_counts.columns = ["Prediction", "Count"]
-        pred_counts["Label"] = pred_counts["Prediction"].map({0: "Safe (0)", 1: "Default (1)"})
-        fig_pie = px.pie(
-            pred_counts, values="Count", names="Label",
-            color="Label",
-            color_discrete_map={"Safe (0)": "#2ecc71", "Default (1)": "#e74c3c"},
-            hole=0.4
-        )
-        fig_pie.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=350)
-        st.plotly_chart(fig_pie, use_container_width=True)
+        with col_left:
+            st.subheader("Prediction Distribution")
+            pred_counts = predictions_df["TARGET"].value_counts().reset_index()
+            pred_counts.columns = ["Target", "Count"]
+            pred_counts["Label"] = pred_counts["Target"].map({0: "Safe (0)", 1: "Default (1)"})
+            fig_pie = px.pie(
+                pred_counts, values="Count", names="Label",
+                color="Label",
+                color_discrete_map={"Safe (0)": "#2ecc71", "Default (1)": "#e74c3c"},
+                hole=0.4
+            )
+            fig_pie.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=350)
+            st.plotly_chart(fig_pie, use_container_width=True)
 
-    with col_right:
-        st.subheader("Risk Score Distribution")
-        fig_hist = px.histogram(
-            predictions_df, x="PREDICTION_PROBA",
-            nbins=50, color_discrete_sequence=["#3498db"],
-            labels={"PREDICTION_PROBA": "Prediction Probability"}
-        )
-        fig_hist.add_vline(x=0.5, line_dash="dash", line_color="red",
-                           annotation_text="Decision Boundary")
-        fig_hist.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=350)
-        st.plotly_chart(fig_hist, use_container_width=True)
+        with col_right:
+            st.subheader("Income Distribution")
+            if "AMT_INCOME_TOTAL" in predictions_df.columns:
+                fig_hist = px.histogram(
+                    predictions_df, x="AMT_INCOME_TOTAL",
+                    nbins=50, color_discrete_sequence=["#3498db"],
+                    labels={"AMT_INCOME_TOTAL": "Income"}
+                )
+                fig_hist.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=350)
+                st.plotly_chart(fig_hist, use_container_width=True)
 
-    st.markdown("---")
+        st.markdown("---")
 
-    # ─── Drift Analysis ───────────────────────────────────
     st.subheader("📉 Feature Drift Analysis (PSI)")
-    st.caption("Population Stability Index — compares prediction data vs training baseline")
+    st.caption("Population Stability Index — compares live data vs training baseline")
 
     if drift_scores:
         fig_drift = go.Figure()
@@ -98,17 +103,17 @@ def render_consultancy_view(predictions_df, training_df, drift_scores, health_st
         ])
         st.dataframe(drift_df, use_container_width=True, hide_index=True)
     else:
-        st.warning("Could not compute drift — training baseline not available.")
+        st.info("No drift data available yet.")
 
     st.markdown("---")
 
-    # ─── Feature Distribution Comparison ───────────────────
-    st.subheader("📊 Feature Distribution: Training vs Predictions")
+    st.subheader("📊 Feature Distribution: Training vs Live")
 
-    if training_df is not None:
-        selected_feature = st.selectbox("Select feature to compare", monitored_features, index=0)
+    if training_df is not None and len(training_df) > 0:
+        available_features = [f for f in monitored_features if f in predictions_df.columns and f in training_df.columns]
+        if available_features:
+            selected_feature = st.selectbox("Select feature to compare", available_features, index=0)
 
-        if selected_feature in training_df.columns and selected_feature in predictions_df.columns:
             fig_compare = go.Figure()
             fig_compare.add_trace(go.Histogram(
                 x=training_df[selected_feature].dropna(),
@@ -118,7 +123,7 @@ def render_consultancy_view(predictions_df, training_df, drift_scores, health_st
             ))
             fig_compare.add_trace(go.Histogram(
                 x=predictions_df[selected_feature].dropna(),
-                name="Current Predictions",
+                name="Live Data",
                 opacity=0.6, marker_color="#e74c3c",
                 nbinsx=50, histnorm="probability"
             ))
@@ -131,22 +136,19 @@ def render_consultancy_view(predictions_df, training_df, drift_scores, health_st
             )
             st.plotly_chart(fig_compare, use_container_width=True)
     else:
-        st.warning("Training baseline not loaded. Cannot compare distributions.")
+        st.warning("Training baseline not loaded.")
 
     st.markdown("---")
 
-    # ─── Gender Fairness ──────────────────────────────────
     st.subheader("⚖️ Fairness Analysis by Gender")
 
-    if "CODE_GENDER" in predictions_df.columns:
+    if "CODE_GENDER" in predictions_df.columns and has_target:
         gender_stats = predictions_df.groupby("CODE_GENDER").agg(
-            count=("PREDICTION", "count"),
-            default_rate=("PREDICTION", "mean"),
-            avg_risk=("PREDICTION_PROBA", "mean")
+            count=("TARGET", "count"),
+            default_rate=("TARGET", "mean"),
         ).reset_index()
         gender_stats["default_rate"] = (gender_stats["default_rate"] * 100).round(1)
-        gender_stats["avg_risk"] = (gender_stats["avg_risk"] * 100).round(1)
-        gender_stats.columns = ["Gender", "Count", "Default Rate (%)", "Avg Risk Score (%)"]
+        gender_stats.columns = ["Gender", "Count", "Default Rate (%)"]
 
         col_g1, col_g2 = st.columns(2)
         with col_g1:
@@ -161,13 +163,12 @@ def render_consultancy_view(predictions_df, training_df, drift_scores, health_st
 
     st.markdown("---")
 
-    # ─── Recent Predictions ────────────────────────────────
-    st.subheader("🔎 Recent Predictions")
+    st.subheader("🔎 Recent Data")
     display_cols = ["SK_ID_CURR", "CODE_GENDER", "AMT_INCOME_TOTAL",
-                    "AMT_CREDIT", "PREDICTION", "PREDICTION_PROBA"]
+                    "AMT_CREDIT", "TARGET"]
     available_cols = [c for c in display_cols if c in predictions_df.columns]
     st.dataframe(
-        predictions_df[available_cols].tail(20),
+        predictions_df[available_cols].head(20),
         use_container_width=True,
         hide_index=True
     )

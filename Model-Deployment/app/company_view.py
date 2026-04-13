@@ -1,8 +1,5 @@
 """
 Company View — Business Overview Dashboard
-============================================
-Management view. High-level metrics across all clients,
-system health, pipeline activity, costs, alerts.
 """
 
 import streamlit as st
@@ -17,7 +14,8 @@ def render_company_view(predictions_df, drift_scores, health_status, health_colo
     st.markdown("High-level business overview across all deployments.")
     st.markdown("---")
 
-    # ─── Top-Level Business Metrics ────────────────────────
+    has_target = "TARGET" in predictions_df.columns
+
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Active Clients", "1")
@@ -30,7 +28,6 @@ def render_company_view(predictions_df, drift_scores, health_status, health_colo
 
     st.markdown("---")
 
-    # ─── System Health + Prediction Volume ─────────────────
     col_left, col_right = st.columns(2)
 
     with col_left:
@@ -50,45 +47,47 @@ def render_company_view(predictions_df, drift_scores, health_status, health_colo
 
     with col_right:
         st.subheader("📈 Prediction Volume")
-        default_rate = (predictions_df["PREDICTION"] == 1).mean() * 100
-        safe_rate = 100 - default_rate
+        if has_target:
+            default_rate = (predictions_df["TARGET"] == 1).mean() * 100
+            safe_rate = 100 - default_rate
 
-        fig_donut = go.Figure(data=[go.Pie(
-            labels=["Safe", "Default"],
-            values=[safe_rate, default_rate],
-            hole=0.5,
-            marker_colors=["#2ecc71", "#e74c3c"]
-        )])
-        fig_donut.update_layout(
-            margin=dict(t=20, b=20, l=20, r=20), height=300,
-            annotations=[dict(
-                text=f"{default_rate:.1f}%",
-                x=0.5, y=0.5, font_size=24, showarrow=False
-            )]
-        )
-        st.plotly_chart(fig_donut, use_container_width=True)
+            fig_donut = go.Figure(data=[go.Pie(
+                labels=["Safe", "Default"],
+                values=[safe_rate, default_rate],
+                hole=0.5,
+                marker_colors=["#2ecc71", "#e74c3c"]
+            )])
+            fig_donut.update_layout(
+                margin=dict(t=20, b=20, l=20, r=20), height=300,
+                annotations=[dict(
+                    text=f"{default_rate:.1f}%",
+                    x=0.5, y=0.5, font_size=24, showarrow=False
+                )]
+            )
+            st.plotly_chart(fig_donut, use_container_width=True)
+        else:
+            st.info("No target data available for prediction volume chart.")
 
     st.markdown("---")
 
-    # ─── Pipeline Activity Log ─────────────────────────────
     st.subheader("🔧 Pipeline Activity Log")
 
     activity_log = pd.DataFrame({
         "Timestamp": [
             datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "2026-04-12 06:07:00",
+            "2026-04-11 18:30:00",
             "2026-04-09 12:29:00",
             "2026-04-06 15:47:00",
             "2026-04-06 15:40:00",
-            "2026-04-05 18:10:00",
-            "2026-04-05 16:15:00",
         ],
         "Event": [
             "Dashboard refreshed",
+            "drift_summary_daily table created",
+            "Vertex AI pipeline compiled",
             "Pub/Sub topic created",
-            "CI/CD pipeline — predictions on full dataset",
+            "CI/CD pipeline — full dataset predictions",
             "Model updated to final_model_debiased.pkl",
-            "CI/CD pipeline — predictor.py updated",
-            "CI/CD pipeline — 100 row test run",
         ],
         "Status": [
             "✅ Success", "✅ Success", "✅ Success",
@@ -99,7 +98,6 @@ def render_company_view(predictions_df, drift_scores, health_status, health_colo
 
     st.markdown("---")
 
-    # ─── Active Alerts ─────────────────────────────────────
     st.subheader("🚨 Active Alerts")
 
     if health_color == "red":
@@ -115,7 +113,6 @@ def render_company_view(predictions_df, drift_scores, health_status, health_colo
 
     st.markdown("---")
 
-    # ─── Resource Usage ────────────────────────────────────
     st.subheader("💰 Resource Usage")
     col_c1, col_c2, col_c3 = st.columns(3)
     with col_c1:
@@ -127,11 +124,10 @@ def render_company_view(predictions_df, drift_scores, health_status, health_colo
 
     st.markdown("---")
 
-    # ─── Client Summary Table ──────────────────────────────
     st.subheader("👥 Client Summary")
 
     client_data = pd.DataFrame({
-        "Client": ["Client A (Loan Predictions)"],
+        "Client": ["Client A"],
         "Records": [f"{len(predictions_df):,}"],
         "Model": ["LightGBM (Debiased)"],
         "Health": [health_status],

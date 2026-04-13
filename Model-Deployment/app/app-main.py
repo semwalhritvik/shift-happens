@@ -1,14 +1,13 @@
 """
 ShiftHappens — MLOps Monitoring Dashboard
 ==========================================
-Main entry point. Run with: streamlit run app/main.py
+Run with: streamlit run app-main.py
 """
 
 import streamlit as st
 import pandas as pd
 import numpy as np
-from google.cloud import storage
-from io import BytesIO
+from google.cloud import bigquery
 from datetime import datetime
 
 from client_view import render_client_view
@@ -22,10 +21,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-GCS_BUCKET = "shifthappens-model-registry"
-PREDICTIONS_FILE = "predictions/new_applications_predictions.csv"
-TRAINING_DATA_BUCKET = "shifthappens-data"
-TRAINING_DATA_FILE = "application_train_merged.pkl"
+BQ_PROJECT = "shifthappens0123"
+BQ_DATASET = "ml_observability"
+PREDICTIONS_TABLE = "prediction_logs"
+TRAINING_TABLE = "training_baseline"
 
 MONITORED_FEATURES = [
     "AMT_INCOME_TOTAL",
@@ -37,13 +36,16 @@ MONITORED_FEATURES = [
 
 
 @st.cache_data(ttl=30)
-def load_predictions_from_gcs():
+def load_predictions():
     try:
-        client = storage.Client()
-        bucket = client.bucket(GCS_BUCKET)
-        blob = bucket.blob(PREDICTIONS_FILE)
-        data = blob.download_as_bytes()
-        return pd.read_csv(BytesIO(data))
+        client = bigquery.Client(project=BQ_PROJECT)
+        query = f"""
+            SELECT *
+            FROM `{BQ_PROJECT}.{BQ_DATASET}.{PREDICTIONS_TABLE}`
+            LIMIT 50000
+        """
+        df = client.query(query).to_dataframe()
+        return df
     except Exception as e:
         st.error(f"Failed to load predictions: {e}")
         return None
@@ -52,35 +54,38 @@ def load_predictions_from_gcs():
 @st.cache_data(ttl=300)
 def load_training_baseline():
     try:
-        client = storage.Client()
-        bucket = client.bucket(TRAINING_DATA_BUCKET)
-        blob = bucket.blob(TRAINING_DATA_FILE)
-        data = blob.download_as_bytes()
-        return pd.read_pickle(BytesIO(data))
+        client = bigquery.Client(project=BQ_PROJECT)
+        query = f"""
+            SELECT *
+            FROM `{BQ_PROJECT}.{BQ_DATASET}.{TRAINING_TABLE}`
+        """
+        df = client.query(query).to_dataframe()
+        return df
     except Exception as e:
-        st.error(f"Failed to load training data: {e}")
+        st.error(f"Failed to load training baseline: {e}")
         return None
 
 
-def compute_drift(training_df, prediction_df, feature):
+@st.cache_data(ttl=30)
+def load_drift_scores():
     try:
-        train_vals = training_df[feature].dropna()
-        pred_vals = prediction_df[feature].dropna()
-        if len(train_vals) == 0 or len(pred_vals) == 0:
-            return 0.0
-        bins = np.histogram_bin_edges(train_vals, bins=10)
-        train_hist, _ = np.histogram(train_vals, bins=bins)
-        pred_hist, _ = np.histogram(pred_vals, bins=bins)
-        train_pct = (train_hist + 1) / (train_hist.sum() + len(train_hist))
-        pred_pct = (pred_hist + 1) / (pred_hist.sum() + len(pred_hist))
-        psi = np.sum((pred_pct - train_pct) * np.log(pred_pct / train_pct))
-        return round(psi, 4)
-    except Exception:
-        return 0.0
+        client = bigquery.Client(project=BQ_PROJECT)
+        query = f"""
+            SELECT feature_name, psi, severity
+            FROM `{BQ_PROJECT}.{BQ_DATASET}.drift_summary_daily`
+            ORDER BY created_at DESC
+            LIMIT 10
+        """
+        df = client.query(query).to_dataframe()
+        return df
+    except Exception as e:
+        return None, str(e)
 
 
 def get_model_health(drift_scores):
-    max_drift = max(drift_scores.values()) if drift_scores else 0
+    if not drift_scores:
+        return "HEALTHY", "green"
+    max_drift = max(drift_scores.values())
     if max_drift < 0.1:
         return "HEALTHY", "green"
     elif max_drift < 0.2:
@@ -160,7 +165,7 @@ def render_retrain_button(health_status, health_color):
 
 # ─── Sidebar ──────────────────────────────────────────────
 st.sidebar.title("🔍 ShiftHappens")
-st.sidebar.caption("Shift happens. We fix it.")
+st.sidebar.caption("Detect the shift. Heal the model.")
 st.sidebar.divider()
 
 view = st.sidebar.radio(
@@ -179,18 +184,29 @@ st.sidebar.caption(f"Last refreshed: {datetime.now().strftime('%H:%M:%S')}")
 
 
 # ─── Load Data ────────────────────────────────────────────
-predictions_df = load_predictions_from_gcs()
+predictions_df = load_predictions()
 training_df = load_training_baseline()
 
-if predictions_df is None:
-    st.error("Cannot load predictions. Check GCS connection.")
+if predictions_df is None or len(predictions_df) == 0:
+    st.warning("No prediction data in BigQuery yet. Run simulate_live_traffic.py to start streaming data.")
     st.stop()
 
+# ─── Load Drift Scores ───────────────────────────────────
 drift_scores = {}
-if training_df is not None:
-    for feature in MONITORED_FEATURES:
-        if feature in predictions_df.columns and feature in training_df.columns:
-            drift_scores[feature] = compute_drift(training_df, predictions_df, feature)
+drift_result = load_drift_scores()
+
+if isinstance(drift_result, tuple):
+    st.sidebar.error(f"Drift query error: {drift_result[1]}")
+    drift_scores = {f: 0.0 for f in MONITORED_FEATURES}
+elif drift_result is not None and len(drift_result) > 0:
+    st.sidebar.write(f"Drift rows loaded: {len(drift_result)}")
+    st.sidebar.dataframe(drift_result, hide_index=True)
+    drift_scores = dict(zip(drift_result["feature_name"], drift_result["psi"]))
+else:
+    st.sidebar.write("No drift data found")
+    drift_scores = {f: 0.0 for f in MONITORED_FEATURES}
+
+st.sidebar.write("Final drift scores:", drift_scores)
 
 health_status, health_color = get_model_health(drift_scores)
 

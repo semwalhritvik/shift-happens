@@ -1,8 +1,5 @@
 """
 Client View — Data Health Dashboard
-=====================================
-The client is the company/person who provides their data.
-They care about: Is my data being processed? Any data quality issues? Drift?
 """
 
 import streamlit as st
@@ -15,7 +12,6 @@ def render_client_view(predictions_df, drift_scores, health_status, health_color
     st.markdown("Monitor the health and quality of your data in real-time.")
     st.markdown("---")
 
-    # ─── Health Banner ─────────────────────────────────────
     if health_color == "green":
         st.markdown(
             """
@@ -52,7 +48,6 @@ def render_client_view(predictions_df, drift_scores, health_status, health_color
 
     st.markdown("")
 
-    # ─── Metrics ───────────────────────────────────────────
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Records Processed", f"{len(predictions_df):,}")
@@ -66,7 +61,6 @@ def render_client_view(predictions_df, drift_scores, health_status, health_color
 
     st.markdown("---")
 
-    # ─── Data Quality Summary ──────────────────────────────
     st.subheader("📈 Data Quality Summary")
     if drift_scores:
         for feature, psi in drift_scores.items():
@@ -85,13 +79,12 @@ def render_client_view(predictions_df, drift_scores, health_status, health_color
 
     st.markdown("---")
 
-    # ─── Data Sample ───────────────────────────────────────
     st.subheader("🔎 Recent Data Sample")
     display_cols = ["SK_ID_CURR", "CODE_GENDER", "AMT_INCOME_TOTAL",
                     "AMT_CREDIT", "AMT_ANNUITY", "DAYS_BIRTH"]
     available_cols = [c for c in display_cols if c in predictions_df.columns]
     st.dataframe(
-        predictions_df[available_cols].tail(10),
+        predictions_df[available_cols].head(10),
         use_container_width=True,
         hide_index=True
     )
