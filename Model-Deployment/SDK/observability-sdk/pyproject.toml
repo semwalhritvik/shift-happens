@@ -1,0 +1,17 @@
+[project]
+name = "gcp_observability_sdk"
+version = "0.1.0"
+description = "A lightweight SDK for GCP observability with BigQuery model logging and monitoring."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "google-cloud-bigquery",
+    "pandas",
+    "scikit-learn",
+    "joblib",
+    "pyarrow",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"

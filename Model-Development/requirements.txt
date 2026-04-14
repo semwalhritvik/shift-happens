@@ -12,3 +12,4 @@ scipy
 joblib
 google-cloud-storage
 pytest
+google-cloud-bigquery

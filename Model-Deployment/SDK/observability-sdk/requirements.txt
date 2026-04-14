@@ -1,0 +1,10 @@
+streamlit
+google-cloud-bigquery
+google-cloud-pubsub
+pandas
+scikit-learn
+joblib
+pyarrow
+fastapi
+uvicorn[standard]
+requests

@@ -1,0 +1,12 @@
+steps:
+- name: 'gcr.io/cloud-builders/terraform'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    cd terraform
+    terraform init
+    terraform apply -auto-approve
+
+options:
+  machineType: 'E2_HIGHCPU_8'
