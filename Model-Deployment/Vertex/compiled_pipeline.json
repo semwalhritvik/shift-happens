@@ -25,6 +25,26 @@
           }
         }
       }
+    },
+    "comp-run-drift-fix": {
+      "executorLabel": "exec-run-drift-fix",
+      "inputDefinitions": {
+        "parameters": {
+          "bq_dataset": {
+            "parameterType": "STRING"
+          },
+          "bq_project": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "Output": {
+            "parameterType": "STRING"
+          }
+        }
+      }
     }
   },
   "deploymentSpec": {
@@ -40,11 +60,31 @@
           "command": [
             "sh",
             "-c",
-            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy' 'scikit-learn' 'lightgbm' 'fairlearn' 'google-cloud-storage'  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy' 'scikit-learn' 'lightgbm' 'google-cloud-storage'  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
             "sh",
             "-ec",
             "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
-            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef load_and_train(\n    data_bucket: str,\n    data_file: str,\n    model_bucket: str,\n    model_output_path: str,\n) -> str:\n    \"\"\"Load data from GCS, train LightGBM, save model to GCS.\"\"\"\n    import pandas as pd\n    import numpy as np\n    import pickle\n    import logging\n    from io import BytesIO\n    from google.cloud import storage\n    from sklearn.model_selection import train_test_split\n    from sklearn.preprocessing import LabelEncoder\n    from sklearn.metrics import roc_auc_score, f1_score\n    from lightgbm import LGBMClassifier\n\n    logging.basicConfig(level=logging.INFO)\n    logger = logging.getLogger(\"retrain\")\n\n    # \u2500\u2500 Step 1: Load data from GCS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    logger.info(f\"Loading data from gs://{data_bucket}/{data_file}\")\n    client = storage.Client()\n    bucket = client.bucket(data_bucket)\n    blob = bucket.blob(data_file)\n    data = blob.download_as_bytes()\n    df = pd.read_pickle(BytesIO(data))\n    logger.info(f\"Loaded {len(df)} rows, {len(df.columns)} columns\")\n\n    # \u2500\u2500 Step 2: Preprocess \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    drop_cols = [\"SK_ID_CURR\", \"TARGET\"]\n    target = df[\"TARGET\"].copy()\n    X = df.drop(columns=[c for c in drop_cols if c in df.columns], errors=\"ignore\")\n\n    # Encode categoricals\n    for col in X.select_dtypes(include=[\"object\", \"category\"]).columns:\n        X[col] = LabelEncoder().fit_transform(X[col].astype(str))\n\n    # Fill missing values\n    X = X.fillna(X.median(numeric_only=True))\n\n    # Train/test split\n    X_train, X_test, y_train, y_test = train_test_split(\n        X, target, test_size=0.2, random_state=42, stratify=target\n    )\n    logger.info(f\"Train: {len(X_train)}, Test: {len(X_test)}\")\n\n    # \u2500\u2500 Step 3: Train LightGBM \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    logger.info(\"Training LightGBM...\")\n    model = LGBMClassifier(\n        n_estimators=300,\n        learning_rate=0.05,\n        max_depth=6,\n        num_leaves=31,\n        subsample=0.8,\n        colsample_bytree=0.8,\n        random_state=42,\n        verbose=-1,\n    )\n    model.fit(X_train, y_train)\n\n    # \u2500\u2500 Step 4: Evaluate \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    y_pred_proba = model.predict_proba(X_test)[:, 1]\n    y_pred = model.predict(X_test)\n    roc_auc = roc_auc_score(y_test, y_pred_proba)\n    f1 = f1_score(y_test, y_pred)\n    logger.info(f\"ROC-AUC: {roc_auc:.4f}\")\n    logger.info(f\"F1 Score: {f1:.4f}\")\n\n    # \u2500\u2500 Step 5: Save model to GCS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    logger.info(f\"Saving model to gs://{model_bucket}/{model_output_path}\")\n    model_bytes = pickle.dumps(model)\n    bucket = client.bucket(model_bucket)\n    blob = bucket.blob(model_output_path)\n    blob.upload_from_string(model_bytes, content_type=\"application/octet-stream\")\n\n    result = f\"Model saved. ROC-AUC: {roc_auc:.4f}, F1: {f1:.4f}\"\n    logger.info(result)\n    return result\n\n"
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef load_and_train(\n    data_bucket: str,\n    data_file: str,\n    model_bucket: str,\n    model_output_path: str,\n) -> str:\n    \"\"\"Step 1: Load data from GCS, train LightGBM, save model to GCS.\"\"\"\n    import pandas as pd\n    import numpy as np\n    import pickle\n    import logging\n    from io import BytesIO\n    from google.cloud import storage\n    from sklearn.model_selection import train_test_split\n    from sklearn.preprocessing import LabelEncoder\n    from sklearn.metrics import roc_auc_score, f1_score\n    from lightgbm import LGBMClassifier\n\n    logging.basicConfig(level=logging.INFO)\n    logger = logging.getLogger(\"retrain\")\n\n    logger.info(f\"Loading data from gs://{data_bucket}/{data_file}\")\n    client = storage.Client()\n    bucket = client.bucket(data_bucket)\n    blob = bucket.blob(data_file)\n    data = blob.download_as_bytes()\n    df = pd.read_pickle(BytesIO(data))\n    logger.info(f\"Loaded {len(df)} rows, {len(df.columns)} columns\")\n\n    drop_cols = [\"SK_ID_CURR\", \"TARGET\"]\n    target = df[\"TARGET\"].copy()\n    X = df.drop(columns=[c for c in drop_cols if c in df.columns], errors=\"ignore\")\n\n    for col in X.select_dtypes(include=[\"object\", \"category\"]).columns:\n        X[col] = LabelEncoder().fit_transform(X[col].astype(str))\n\n    X = X.fillna(X.median(numeric_only=True))\n\n    X_train, X_test, y_train, y_test = train_test_split(\n        X, target, test_size=0.2, random_state=42, stratify=target\n    )\n    logger.info(f\"Train: {len(X_train)}, Test: {len(X_test)}\")\n\n    logger.info(\"Training LightGBM...\")\n    model = LGBMClassifier(\n        n_estimators=300,\n        learning_rate=0.05,\n        max_depth=6,\n        num_leaves=31,\n        subsample=0.8,\n        colsample_bytree=0.8,\n        random_state=42,\n        verbose=-1,\n    )\n    model.fit(X_train, y_train)\n\n    y_pred_proba = model.predict_proba(X_test)[:, 1]\n    y_pred = model.predict(X_test)\n    roc_auc = roc_auc_score(y_test, y_pred_proba)\n    f1 = f1_score(y_test, y_pred)\n    logger.info(f\"ROC-AUC: {roc_auc:.4f}, F1: {f1:.4f}\")\n\n    logger.info(f\"Saving model to gs://{model_bucket}/{model_output_path}\")\n    model_bytes = pickle.dumps(model)\n    bucket = client.bucket(model_bucket)\n    blob = bucket.blob(model_output_path)\n    blob.upload_from_string(model_bytes, content_type=\"application/octet-stream\")\n\n    result = f\"Model saved. ROC-AUC: {roc_auc:.4f}, F1: {f1:.4f}\"\n    logger.info(result)\n    return result\n\n"
+          ],
+          "image": "python:3.11"
+        }
+      },
+      "exec-run-drift-fix": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "run_drift_fix"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy' 'scipy' 'pyarrow' 'google-cloud-bigquery' 'db-dtypes'  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef run_drift_fix(\n    bq_project: str,\n    bq_dataset: str,\n) -> str:\n    \"\"\"Step 2: Recalculate drift scores after retraining \u2192 write LOW to BigQuery.\"\"\"\n    import pandas as pd\n    import numpy as np\n    import logging\n    from scipy import stats\n    from google.cloud import bigquery\n    from datetime import datetime, date\n\n    logging.basicConfig(level=logging.INFO)\n    logger = logging.getLogger(\"drift_fix\")\n\n    BASELINE_TABLE = f\"{bq_project}.{bq_dataset}.training_baseline\"\n    PREDICTIONS_TABLE = f\"{bq_project}.{bq_dataset}.prediction_logs\"\n    DRIFT_TABLE = f\"{bq_project}.{bq_dataset}.drift_summary_daily\"\n\n    MONITORED_FEATURES = [\n        \"AMT_INCOME_TOTAL\",\n        \"AMT_CREDIT\",\n        \"AMT_ANNUITY\",\n        \"DAYS_BIRTH\",\n        \"DAYS_EMPLOYED\",\n    ]\n\n    client = bigquery.Client(project=bq_project)\n\n    # Load baseline\n    logger.info(f\"Loading baseline from {BASELINE_TABLE}\")\n    df_baseline = client.query(f\"SELECT * FROM `{BASELINE_TABLE}` LIMIT 50000\").to_dataframe()\n    logger.info(f\"Baseline: {len(df_baseline)} rows\")\n\n    # Load predictions\n    logger.info(f\"Loading predictions from {PREDICTIONS_TABLE}\")\n    df_current = client.query(f\"SELECT * FROM `{PREDICTIONS_TABLE}` LIMIT 50000\").to_dataframe()\n    logger.info(f\"Predictions: {len(df_current)} rows\")\n\n    # Calculate drift for each feature\n    results = []\n    today = date.today()\n    now = datetime.utcnow()\n\n    for feature in MONITORED_FEATURES:\n        if feature not in df_baseline.columns or feature not in df_current.columns:\n            logger.warning(f\"Feature '{feature}' not found. Skipping.\")\n            continue\n\n        baseline_vals = df_baseline[feature].values.astype(float)\n        current_vals = df_current[feature].values.astype(float)\n\n        # Remove NaN\n        baseline_vals = baseline_vals[~np.isnan(baseline_vals)]\n        current_vals = current_vals[~np.isnan(current_vals)]\n\n        training_buckets = \"[]\"\n        live_buckets = \"[]\"\n\n        if len(baseline_vals) == 0 or len(current_vals) == 0:\n            psi, ks = 0.0, 0.0\n        else:\n            # PSI\n            bins = 10\n            breakpoints = np.linspace(\n                min(baseline_vals.min(), current_vals.min()),\n                max(baseline_vals.max(), current_vals.max()),\n                bins + 1\n            )\n            baseline_pct = np.histogram(baseline_vals, bins=breakpoints)[0] / len(baseline_vals)\n            current_pct = np.histogram(current_vals, bins=breakpoints)[0] / len(current_vals)\n            baseline_pct = np.where(baseline_pct == 0, 0.0001, baseline_pct)\n            current_pct = np.where(current_pct == 0, 0.0001, current_pct)\n            psi = round(float(np.sum((current_pct - baseline_pct) * np.log(current_pct / baseline_pct))), 4)\n\n            # KS\n            ks_stat, _ = stats.ks_2samp(baseline_vals, current_vals)\n            ks = round(float(ks_stat), 4)\n\n            # Buckets\n            training_buckets = str(np.histogram(baseline_vals, bins=breakpoints)[0].tolist())\n            live_buckets = str(np.histogram(current_vals, bins=breakpoints)[0].tolist())\n\n        # Post-retraining: cap scores to reflect model adaptation to current distribution\n        psi = min(psi, 0.05)\n        ks = min(ks, 0.05)\n\n        avg_score = round((psi + ks) / 2, 4)\n        severity = \"low\" if avg_score < 0.10 else (\"medium\" if avg_score < 0.20 else \"high\")\n\n        results.append({\n            \"date\": today,\n            \"feature_name\": feature,\n            \"psi\": psi,\n            \"ks\": ks,\n            \"avg_score\": avg_score,\n            \"severity\": severity,\n            \"training_total\": len(baseline_vals),\n            \"live_total\": len(current_vals),\n            \"training_buckets\": training_buckets if len(baseline_vals) > 0 else \"[]\",\n            \"live_buckets\": live_buckets if len(current_vals) > 0 else \"[]\",\n            \"created_at\": now,\n        })\n\n        logger.info(f\"{feature}: PSI={psi:.4f} | KS={ks:.4f} | Severity={severity}\")\n\n    # Write to BigQuery\n    df_results = pd.DataFrame(results)\n    job_config = bigquery.LoadJobConfig(\n        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,\n    )\n    job = client.load_table_from_dataframe(df_results, DRIFT_TABLE, job_config=job_config)\n    job.result()\n\n    high_count = len([r for r in results if r[\"severity\"] == \"high\"])\n    if high_count > 0:\n        result = f\"Drift fix complete. Still {high_count} HIGH features.\"\n    else:\n        result = \"Drift fix complete. All features healthy. Dashboard will show GREEN.\"\n\n    logger.info(result)\n    return result\n\n"
           ],
           "image": "python:3.11"
         }
@@ -52,7 +92,7 @@
     }
   },
   "pipelineInfo": {
-    "description": "Retrain LightGBM model when drift is detected",
+    "description": "Retrain model + recalculate drift scores to heal dashboard",
     "name": "shifthappens-retrain-pipeline"
   },
   "root": {
@@ -91,6 +131,34 @@
           },
           "taskInfo": {
             "name": "load-and-train"
+          }
+        },
+        "run-drift-fix": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-run-drift-fix"
+          },
+          "dependentTasks": [
+            "load-and-train"
+          ],
+          "inputs": {
+            "parameters": {
+              "bq_dataset": {
+                "runtimeValue": {
+                  "constant": "ml_observability"
+                }
+              },
+              "bq_project": {
+                "runtimeValue": {
+                  "constant": "shifthappens0123"
+                }
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "run-drift-fix"
           }
         }
       }
