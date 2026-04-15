@@ -10,3 +10,20 @@ Data-Pipeline/data/processed/
 Data-Pipeline\credentials.json
 Data-Pipeline/credentials.json
 Demo-Environment/
+
+
+# --- Website (Next.js) ---
+Landing-Page/node_modules/
+Landing-Page/.next/
+Landing-Page/out/
+Landing-Page/build/
+
+# Next.js local environment variables
+Landing-Page/.env*.local
+
+# Vercel local build
+Landing-Page/.vercel/
+
+# TypeScript/Next.js cache
+Landing-Page/.tsbuildinfo
+Landing-Page/next-env.d.ts
