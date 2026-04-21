@@ -27,3 +27,16 @@ We have built an end-to-end model training, validation, and deployment pipeline 
 - **CI/CD:** Google Cloud Build trigger connected to GitHub automatically runs the full pipeline on every push to `main`. Training data is stored in GCS and downloaded at build time. Email notifications alert on pipeline failures.
 
 Please navigate to the `Model-Development/README.md` for detailed instructions on reproducing the pipeline, viewing model comparison results, bias reports, and running the unit tests.
+
+## Phase 3: Cloud Deployment & MLOps (ShiftHappens)
+
+For the final phase of this project, the model transitions from a static artifact into a monitored, production-grade cloud deployment. We have architected an enterprise-level observability overlay called **ShiftHappens**, deployed entirely on Google Cloud Platform (GCP).
+
+### Fulfillment of Deployment Requirements
+
+1. **Cloud Architecture & Automation**: The entire infrastructure (Pub/Sub, BigQuery, Cloud Functions) is codified and deployed autonomously. 
+2. **CI/CD Integration**: We utilize Google Cloud Build (`cloudbuild.yaml`) to automatically trigger deployments, build Docker containers, and push to Artifact Registry upon repository updates.
+3. **Logs & Monitoring**: Instead of synchronous logging that blocks API responses, we built a custom Python SDK that asynchronously intercepts live prediction traffic and publishes JSON payloads to GCP Pub/Sub, which are ETL'd into BigQuery for persistent logging.
+4. **Model Monitoring & Retraining**: A scheduled Cloud Function periodically calculates the Population Stability Index (PSI) against our baseline distribution. If macroeconomic data drift is detected, the ShiftHappens Streamlit dashboard alerts the team and provides a "1-Click Remediation" button to trigger a Vertex AI Kubeflow pipeline, dynamically retraining the model on the drifted data.
+
+For detailed replication steps, infrastructure setup, and the monitoring dashboard codebase, see the [Model-Deployment/README.md](./Model-Deployment/README.md).
