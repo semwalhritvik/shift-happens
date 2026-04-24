@@ -40,3 +40,5 @@ For the final phase of this project, the model transitions from a static artifac
 4. **Model Monitoring & Retraining**: A scheduled Cloud Function periodically calculates the Population Stability Index (PSI) against our baseline distribution. If macroeconomic data drift is detected, the ShiftHappens Streamlit dashboard alerts the team and provides a "1-Click Remediation" button to trigger a Vertex AI Kubeflow pipeline, dynamically retraining the model on the drifted data.
 
 For detailed replication steps, infrastructure setup, and the monitoring dashboard codebase, see the [Model-Deployment/README.md](./Model-Deployment/README.md).
+
+Live Demo Video: https://drive.google.com/file/d/1l286LsjyJEtIQsbqZbLs-_70lx6blfhf/view?usp=drivesdk
